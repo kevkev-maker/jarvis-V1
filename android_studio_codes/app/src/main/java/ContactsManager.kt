@@ -30,6 +30,7 @@ class ContactsManager(private val context: Context) {
                 while (it.moveToNext()) {
                     val nom = it.getString(0) ?: continue
                     val tel = it.getString(1) ?: continue
+                    if (nom.isBlank()) continue   // JARVIS: blank names matched every search
                     val nomContactLower = nom.lowercase()
                     val partiesContact = nomContactLower.split(" ")
 
@@ -37,7 +38,7 @@ class ContactsManager(private val context: Context) {
                         // ✅ Le nom recherché est contenu dans le nom du contact
                         partiesContact.any { partie -> partie.startsWith(nomLower) } ||
                                 // ✅ Le nom du contact est contenu dans le nom recherché
-                                nomLower.startsWith(partiesContact[0]) ||
+                                (partiesContact[0].length >= 3 && nomLower.startsWith(partiesContact[0])) ||
                                 // ✅ Similarité élevée (seuil augmenté à 0.85)
                                 partiesContact.any { partie ->
                                     calculerSimilarite(nomLower, partie) >= 0.85

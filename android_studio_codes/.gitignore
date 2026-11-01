@@ -42,7 +42,7 @@ ovr_env.sh
 .gradle
 **/build/
 !src/**/build/
-gradle-wrapper.jar
+# gradle-wrapper.jar is needed to build, so it is committed
 .gradletasknamecache
 
 

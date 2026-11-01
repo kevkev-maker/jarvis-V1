@@ -1,7 +1,6 @@
 <resources>
-    <string name="app_name">My App</string>
+    <string name="app_name">JARVIS</string>
     <string name="accessibility_service_description">
-    Alexandra a besoin de ce service pour envoyer automatiquement
-    des messages WhatsApp par commande vocale.
+    JARVIS uses this only to press the Send button in WhatsApp when you ask it to send a message by voice.
     </string>
 </resources>

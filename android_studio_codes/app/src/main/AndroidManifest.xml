@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.myapp">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- JARVIS V1: background microphone (foreground service with visible notification) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- JARVIS: "near me" places, the blue orb / top bar, and opening WhatsApp from the background -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
 
     <!-- Internet pour Firebase -->
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -40,6 +47,13 @@
         <package android:name="com.google.android.googlequicksearchbox"/>
         <package android:name="com.whatsapp"/>
         <package android:name="com.whatsapp.w4b"/>
+        <!-- JARVIS V1: needed to find text-to-speech and speech-recognition engines -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
+        </intent>
     </queries>
 
     <application
@@ -51,15 +65,56 @@
         android:theme="@style/Theme.Alexandra">
 
         <!-- Écran de démarrage -->
+        <!-- JARVIS V1: new start screen. The old Alexandra intro/login is kept below
+             and can still be opened from the JARVIS screen (it needs Firebase). -->
         <activity
-            android:name=".IntroActivity"
+            android:name=".jarvis.JarvisActivity"
             android:screenOrientation="portrait"
+            android:launchMode="singleTop"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".jarvis.VoiceSettingsActivity"
+            android:screenOrientation="portrait"
+            android:exported="false"/>
+
+        <activity
+            android:name=".jarvis.JarvisOrbActivity"
+            android:screenOrientation="portrait"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:exported="false"/>
+
+        <receiver
+            android:name=".jarvis.JarvisReminderReceiver"
+            android:exported="false"/>
+
+        <receiver
+            android:name=".jarvis.JarvisBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".jarvis.JarvisService"
+            android:exported="false"
+            android:foregroundServiceType="microphone"/>
+
+        <activity
+            android:name=".IntroActivity"
+            android:screenOrientation="portrait"
+            android:exported="false"/>
 
         <!-- Connexion -->
         <activity
@@ -137,7 +192,7 @@
         <service
             android:name=".AlexandraAccessibilityService"
             android:exported="true"
-            android:label="Alexandra - Assistant vocal"
+            android:label="JARVIS (presses Send in WhatsApp)"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService"/>

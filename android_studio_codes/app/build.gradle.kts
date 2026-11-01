@@ -2,22 +2,47 @@
 // build.gradle.kts  —  MODULE app
 // ================================================
 
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("com.google.gms.google-services")
 }
+
+// JARVIS V1: Firebase is optional. The old Alexandra login/history screens need it,
+// JARVIS itself does not. If you later add your own app/google-services.json,
+// Firebase switches back on automatically.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
+// Secrets live in local.properties (never committed to Git). Example line:
+// GROQ_API_KEY=gsk_xxxxxxxx
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun localProp(name: String, default: String = ""): String =
+    (localProps.getProperty(name) ?: default).replace("\"", "")
 
 android {
     namespace = "com.example.myapp"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.myapp"
-        minSdk = 24
+        // New app id so JARVIS installs next to (not over) any old Alexandra build.
+        applicationId = "com.kevin.jarvis"
+        minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0-jarvis"
+
+        buildConfigField("String", "GROQ_API_KEY", "\"${localProp("GROQ_API_KEY")}\"")
+        buildConfigField("String", "GROQ_MODEL", "\"${localProp("GROQ_MODEL", "llama-3.1-8b-instant")}\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
@@ -31,12 +56,12 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
     }
 }
 
@@ -67,4 +92,8 @@ dependencies {
     // ✅ NOUVEAU : Glide pour photo profil circulaire
     implementation("com.github.bumptech.glide:glide:4.16.0")
     annotationProcessor("com.github.bumptech.glide:compiler:4.16.0")
+
+    // JARVIS V1: Vosk offline speech recognition (Apache 2.0, free) for the wake word
+    implementation("com.alphacephei:vosk-android:0.3.47@aar")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
 }
