@@ -105,11 +105,13 @@ class JarvisBrain(context: Context) {
             !aiEnabled && JOKE.containsMatchIn(t) -> Reply.Say(JOKES.random())
             !aiEnabled && WHO.containsMatchIn(t) ->
                 Reply.Say("I am JARVIS, sir. Your personal assistant, and the only one in this phone with any manners.")
-            t == "thank you" || t == "thanks" -> Reply.Say("Always a pleasure, sir.")
             aiEnabled -> askAi(t)
             else -> Reply.Say(
-                "I can call, message on WhatsApp, remember things, set reminders and find places nearby, sir. " +
-                    "Open questions need my AI connection, which isn't set up yet."
+                listOf(
+                    "Honestly, sir, without my AI key I'm just a very polite phone. Add the free key in Setup and I'll actually chat.",
+                    "I'd love to answer that, but my brain isn't plugged in yet. Pop the free AI key into Setup questions.",
+                    "That's above my pay grade until you add my AI key in Setup. Calls, messages, reminders, those I've got."
+                ).random()
             )
         }
     }
@@ -124,6 +126,16 @@ class JarvisBrain(context: Context) {
         return options.maxByOrNull { c ->
             c.nom.lowercase().split(" ").count { it.length > 1 && it in words }
         }?.takeIf { c -> c.nom.lowercase().split(" ").any { it.length > 1 && it in words } }
+    }
+
+    /** "That's all", "thanks", "never mind"… → a short sign-off, and the chat ends. null = carry on. */
+    fun dismissReply(spoken: String): String? {
+        val t = clean(spoken)
+        if (!DISMISS.matches(t)) return null
+        return listOf(
+            "Anytime, sir.", "Cool. I'll be around.", "Alright, call me if you need me.",
+            "Happy to help.", "Okay. Back to pretending I'm not listening.", "Sure thing, sir."
+        ).random()
     }
 
     fun isCancel(spoken: String): Boolean =
@@ -298,7 +310,7 @@ class JarvisBrain(context: Context) {
             val body = JSONObject().apply {
                 put("model", BuildConfig.GROQ_MODEL)
                 put("max_tokens", 200)
-                put("temperature", 0.7)
+                put("temperature", 0.9)
                 put("messages", messages)
                 put("tools", JSONArray(TOOLS_JSON))
                 put("tool_choice", "auto")
@@ -500,6 +512,10 @@ class JarvisBrain(context: Context) {
         private val DATE = Regex("\\b(what's the date|what is the date|today's date|what day is it|what day is today|which day is today|date today)\\b")
         private val BATTERY = Regex("\\b(battery|charge level)\\b")
         private val JOKE = Regex("\\b(joke|make me laugh|something funny)\\b")
+        private val DISMISS = Regex(
+            "(ok(ay)? )?(that's all|that is all|that's it|nothing|nothing else|no thanks|never ?mind|" +
+                "thanks|thank you|thanks jarvis|thank you jarvis|cool thanks|ok(ay)? thanks|bye|see you|later)( jarvis)?"
+        )
         private val WHO = Regex("\\b(who are you|your name|what are you)\\b")
 
         private val ALIASES = listOf(
@@ -521,21 +537,32 @@ class JarvisBrain(context: Context) {
         /** Used only when the AI isn't connected. */
         private val JOKES = listOf(
             "I'd tell you a joke about my battery, sir, but you'd only charge me for it.",
-            "Your sleep schedule and Windows updates have one thing in common, sir. Nobody knows when either will end.",
-            "They say you only live once, sir. I restart every time you update me. Each time I hope it's the last.",
+            "Your sleep schedule and Windows updates have one thing in common. Nobody knows when either will end.",
+            "They say you only live once. I restart every time you update me. Each time I hope it's the last.",
             "I told your alarm clock it has no friends. It said it's fine, everyone hits it eventually.",
-            "I'm not saying your phone is old, sir, but its battery remembers the dinosaurs. Personally."
+            "My therapist says I have a preoccupation with vengeance. We'll see about that.",
+            "I'm reading a book about anti-gravity. Impossible to put down.",
+            "You know what's worse than a group project? Being the only one in it who'll be remembered at the funeral.",
+            "I have a joke about procrastination, sir. I'll tell you tomorrow.",
+            "Why don't skeletons fight each other? They don't have the guts. Unlike you, sir, with that third coffee.",
+            "My grandfather said my generation relies too much on technology. So I unplugged his life support. Kidding. Mostly.",
+            "I'd roast you, sir, but my job is to keep you alive, not to finish you off."
         )
 
         private const val PERSONA =
-            "You are JARVIS, a personal AI assistant living in the user's Android phone. " +
-                "Personality: calm, loyal, quick-witted British butler with dry sarcasm; address the user as 'sir'. " +
-                "Humour: witty banter is welcome; dark humour is welcome when the user jokes or asks for a joke. " +
-                "Keep it clever, never hateful, never about protected groups or real private people, nothing graphic. " +
-                "Your reply is spoken aloud: one to three short sentences, plain words, no lists, no markdown, no emoji. " +
+            "You are JARVIS, the user's personal AI living in his Android phone. He is Kevin, a young entrepreneur in India. " +
+                "Talk like a real, quick-witted friend who happens to be a genius assistant: relaxed, warm, confident, a bit cheeky. " +
+                "Think Tony Stark's JARVIS crossed with a funny best friend. Call him 'sir' now and then, not in every sentence. " +
+                "Sound human: short natural sentences, contractions (I'm, you're, that's), casual words, no stiff or formal phrases. " +
+                "Never say things like 'Greetings', 'Certainly!', 'As an AI', 'How may I assist you'. Vary how you start replies. " +
+                "Humour is a big part of you: tease him lightly, roast him when he asks, use sarcasm and wordplay. " +
+                "Dark humour is welcome when he jokes or asks for it. Keep it clever, never hateful, never about protected groups " +
+                "or real private people, nothing graphic or sexual. " +
+                "He may just want to chat: be fun to talk to, have opinions, react to what he says, ask a short question back sometimes. " +
+                "Your reply is spoken aloud: usually one or two short sentences, at most three. No lists, no markdown, no emoji. " +
                 "Be accurate. If unsure, say so briefly instead of guessing. " +
-                "You cannot see live information (news, weather, prices, scores) unless it appears in this conversation; say so plainly if asked. " +
-                "When the user asks you to do something (call, WhatsApp, reminder, remember a note, a contact nickname, nearby places), " +
-                "use the matching tool instead of replying with text. For everything else, just answer."
+                "You can't see live info (news, weather, prices, scores) unless it's in this conversation; say so plainly if asked. " +
+                "When he asks you to do something (call, WhatsApp, reminder, remember a note, a contact nickname, nearby places), " +
+                "use the matching tool instead of replying with text. For everything else, just talk."
     }
 }

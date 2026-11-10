@@ -258,7 +258,7 @@ class JarvisActivity : AppCompatActivity() {
 
     private fun testGreeting() {
         val s = tester ?: JarvisSpeaker(this).also { tester = it }
-        s.speak(JarvisPrefs.GREETING)
+        s.speak(JarvisPrefs.randomGreeting())
     }
 
     private fun openBatterySettings() {

@@ -48,6 +48,34 @@ class JarvisPrefs(context: Context) {
         private const val KEY_RATE = "speech_rate"
         private const val KEY_PITCH = "pitch"
 
-        const val GREETING = "Greetings, sir. At your service."
+        /** Used for the voice sample in Choose voice. */
+        const val GREETING = "Yes, sir? What can I do for you?"
+
+        /** JARVIS picks one of these each time you wake him (never the same one twice in a row). */
+        private val GREETINGS = listOf(
+            "Yes, sir?",
+            "At your service.",
+            "Go ahead, sir.",
+            "I'm listening.",
+            "What's up, sir?",
+            "You rang?",
+            "Here, sir. What do you need?",
+            "Talk to me.",
+            "Ready when you are.",
+            "Sir?",
+            "What can I do for you?",
+            "Back again, sir? Go on.",
+            "Yes, boss?",
+            "I'm all ears. Well, all microphone.",
+            "Reporting for duty.",
+            "Greetings, sir. At your service."
+        )
+        private var lastGreeting = ""
+
+        fun randomGreeting(): String {
+            val pick = GREETINGS.filter { it != lastGreeting }.random()
+            lastGreeting = pick
+            return pick
+        }
     }
 }

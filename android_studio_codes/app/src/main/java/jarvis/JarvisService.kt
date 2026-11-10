@@ -138,9 +138,9 @@ class JarvisService : Service() {
     private fun onWakeWord() {
         if (!alive) return
         ears?.stop()   // free the microphone
-        setStatus("At your service")
+        setStatus("Listening…")
         showSessionUi()
-        speaker.speak(JarvisPrefs.GREETING) { listenForCommand() }
+        speaker.speak(JarvisPrefs.randomGreeting()) { listenForCommand() }
     }
 
     private fun listenForCommand() {
@@ -189,6 +189,12 @@ class JarvisService : Service() {
             val picked = brain.pickContact(text, choice.options)
             if (picked == null) say("Sorry sir, I didn't catch which one. Cancelled.")
             else act(choice.onPick(picked))
+            return
+        }
+        // "That's all" / "thanks" / "never mind" ends the chat; JARVIS goes back to waiting for "Jarvis".
+        brain.dismissReply(text)?.let { bye ->
+            setStatus("Speaking", bye)
+            speaker.speak(bye) { waitForWakeWord() }
             return
         }
         scope.launch { act(brain.handle(text)) }
@@ -247,10 +253,13 @@ class JarvisService : Service() {
         }
     }
 
-    /** Speak, then go back to waiting for the wake word. */
+    /**
+     * Speak, then keep listening so you can carry on chatting without saying "Jarvis" again.
+     * If you say nothing, JARVIS goes back to waiting for "Jarvis".
+     */
     private fun say(text: String) {
         setStatus("Speaking", text)
-        speaker.speak(text) { waitForWakeWord() }
+        speaker.speak(text) { listenForCommand() }
     }
 
     /** Returns null on success, or a sentence to speak on failure. */
