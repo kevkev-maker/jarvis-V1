@@ -110,8 +110,11 @@ class JarvisActivity : AppCompatActivity() {
 
         // Extras
         root.addView(Ui.sectionHeader(this, "More"))
-        val ai = if (JarvisBrain(this).aiEnabled) "on" else "off (optional, see README_JARVIS.md)"
+        val ai = if (JarvisBrain(this).aiEnabled) "on" else "off (add a free key in Setup questions)"
         root.addView(Ui.label(this, "AI answers for open questions: $ai", 13f, Ui.MUTED))
+        root.addView(Ui.spaced(this, Ui.button(this, "Setup questions (nicknames, AI key)") {
+            startActivity(Intent(this, SetupActivity::class.java))
+        }))
         root.addView(Ui.spaced(this, Ui.button(this, "Open original Alexandra app") { openLegacyApp() }))
         root.addView(Ui.spaced(this, Ui.label(this,
             "Based on “Alexandra” by Leila-dev, MIT licence.", 12f, Ui.MUTED), 16))
@@ -120,6 +123,9 @@ class JarvisActivity : AppCompatActivity() {
             setBackgroundColor(Ui.BG)
             addView(root)
         })
+
+        // First launch: ask the setup questions before anything else.
+        if (!JarvisPrefs(this).setupDone) startActivity(Intent(this, SetupActivity::class.java))
     }
 
     override fun onResume() {

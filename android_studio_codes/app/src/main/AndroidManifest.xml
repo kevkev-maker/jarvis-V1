@@ -84,6 +84,12 @@
             android:exported="false"/>
 
         <activity
+            android:name=".jarvis.SetupActivity"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="false"/>
+
+        <activity
             android:name=".jarvis.JarvisOrbActivity"
             android:screenOrientation="portrait"
             android:launchMode="singleTask"

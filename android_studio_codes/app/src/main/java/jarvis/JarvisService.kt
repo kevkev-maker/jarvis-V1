@@ -59,6 +59,7 @@ class JarvisService : Service() {
     private var inSession = false
     private var useVoskForCommands = false
     private var pending: PendingChoice? = null
+    private var pendingConfirm: (() -> JarvisBrain.Reply)? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -122,6 +123,7 @@ class JarvisService : Service() {
     private fun waitForWakeWord() {
         if (!alive) return
         pending = null
+        pendingConfirm = null
         setStatus(STATUS_IDLE)
         if (inSession) hideSessionUi()
         ears?.listenForWakeWord(
@@ -174,6 +176,12 @@ class JarvisService : Service() {
     private fun process(text: String) {
         if (!alive) return
         setStatus("Thinking…", "“$text”")
+        val confirm = pendingConfirm
+        if (confirm != null) {
+            pendingConfirm = null
+            if (brain.isYes(text)) act(confirm()) else say("Okay, cancelled, sir.")
+            return
+        }
         val choice = pending
         if (choice != null) {
             pending = null
@@ -204,6 +212,11 @@ class JarvisService : Service() {
                 }
             }
             is JarvisBrain.Reply.SendWhatsApp -> sendWhatsApp(reply.contact, reply.message)
+            is JarvisBrain.Reply.Confirm -> {
+                pendingConfirm = reply.onYes
+                setStatus("Waiting for yes or no", reply.question)
+                speaker.speak(reply.question) { listenForCommand() }
+            }
         }
     }
 

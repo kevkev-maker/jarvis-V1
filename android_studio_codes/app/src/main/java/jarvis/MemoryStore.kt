@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * except that notes are included in questions sent to the optional AI.
  */
 class MemoryStore private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "jarvis_memory.db", null, 1) {
+    SQLiteOpenHelper(context.applicationContext, "jarvis_memory.db", null, 2) {
 
     data class Note(val id: Long, val text: String, val createdAt: Long)
     data class Reminder(val id: Long, val text: String, val at: Long)
@@ -25,9 +25,16 @@ class MemoryStore private constructor(context: Context) :
             "CREATE TABLE reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                 "text TEXT NOT NULL, remind_at INTEGER NOT NULL, done INTEGER NOT NULL DEFAULT 0)"
         )
+        createAliases(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    private fun createAliases(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS aliases (word TEXT PRIMARY KEY, contact TEXT NOT NULL)")
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createAliases(db)
+    }
 
     // ─── notes ───────────────────────────────────────────────────────────────
 
@@ -101,6 +108,39 @@ class MemoryStore private constructor(context: Context) :
     fun markDone(id: Long) {
         val cv = ContentValues().apply { put("done", 1) }
         writableDatabase.update("reminders", cv, "id = ?", arrayOf(id.toString()))
+    }
+
+    // ─── contact nicknames ("mom" → "birth giver") ───────────────────────────
+
+    @Synchronized
+    fun setAlias(word: String, contact: String) {
+        val cv = ContentValues().apply {
+            put("word", word.lowercase().trim())
+            put("contact", contact.trim())
+        }
+        writableDatabase.insertWithOnConflict("aliases", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    @Synchronized
+    fun alias(word: String): String? {
+        readableDatabase.rawQuery(
+            "SELECT contact FROM aliases WHERE word = ?", arrayOf(word.lowercase().trim())
+        ).use { c -> if (c.moveToFirst()) return c.getString(0) }
+        return null
+    }
+
+    @Synchronized
+    fun aliases(): List<Pair<String, String>> {
+        val out = mutableListOf<Pair<String, String>>()
+        readableDatabase.rawQuery("SELECT word, contact FROM aliases ORDER BY word", null).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0) to c.getString(1))
+        }
+        return out
+    }
+
+    @Synchronized
+    fun clearAliases() {
+        writableDatabase.delete("aliases", null, null)
     }
 
     companion object {

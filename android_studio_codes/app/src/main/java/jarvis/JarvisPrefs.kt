@@ -23,6 +23,26 @@ class JarvisPrefs(context: Context) {
         get() = prefs.getFloat(KEY_PITCH, 1.0f)
         set(value) = prefs.edit().putFloat(KEY_PITCH, value).apply()
 
+    /** First-launch questions answered. */
+    var setupDone: Boolean
+        get() = prefs.getBoolean("setup_done", false)
+        set(value) = prefs.edit().putBoolean("setup_done", value).apply()
+
+    /** Say "Call …?" and wait for yes before calling. */
+    var confirmCalls: Boolean
+        get() = prefs.getBoolean("confirm_calls", false)
+        set(value) = prefs.edit().putBoolean("confirm_calls", value).apply()
+
+    /** Read the message back and wait for yes before sending. */
+    var confirmWhatsApp: Boolean
+        get() = prefs.getBoolean("confirm_whatsapp", false)
+        set(value) = prefs.edit().putBoolean("confirm_whatsapp", value).apply()
+
+    /** Free Groq key typed in Setup (stays on this phone). */
+    var groqKey: String
+        get() = prefs.getString("groq_key", "") ?: ""
+        set(value) = prefs.edit().putString("groq_key", value).apply()
+
     companion object {
         private const val KEY_VOICE = "voice_name"
         private const val KEY_RATE = "speech_rate"

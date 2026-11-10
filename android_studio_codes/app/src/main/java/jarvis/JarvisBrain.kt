@@ -42,11 +42,14 @@ class JarvisBrain(context: Context) {
             val onPick: (Contact) -> Reply
         ) : Reply()
         data class Goodbye(val text: String) : Reply()
+        /** Ask a yes/no question; run [onYes] only if the answer is yes. */
+        data class Confirm(val question: String, val onYes: () -> Reply) : Reply()
     }
 
     private val appContext = context.applicationContext
     private val contacts = ContactsManager(appContext)
     private val store = MemoryStore.get(appContext)
+    private val prefs = JarvisPrefs(appContext)
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -59,13 +62,21 @@ class JarvisBrain(context: Context) {
     private var lastPlaces: List<PlacesFinder.Place>? = null
     private var lastPick: PlacesFinder.Place? = null
 
-    val aiEnabled: Boolean get() = BuildConfig.GROQ_API_KEY.isNotBlank()
+    /** Key typed in Setup, or one built into the app. */
+    private fun groqKey(): String = prefs.groqKey.trim().ifBlank { BuildConfig.GROQ_API_KEY }
+
+    val aiEnabled: Boolean get() = groqKey().isNotBlank()
 
     suspend fun handle(spoken: String): Reply {
         val t = clean(spoken)
         if (t.isEmpty()) return Reply.Say("Yes, sir?")
 
         // ── Memory ─────────────────────────────────────────────────────────
+        NICKNAME.find(t)?.let { m ->
+            val w = m.groupValues[1].ifEmpty { m.groupValues[3] }
+            val c = m.groupValues[2].ifEmpty { m.groupValues[4] }
+            return setNickname(w, c)
+        }
         REMEMBER.find(t)?.let { return remember(it.groupValues[1]) }
         if (RECALL.containsMatchIn(t)) return recall()
         FORGET.find(t)?.let { return forget(it.groupValues[1]) }
@@ -95,7 +106,7 @@ class JarvisBrain(context: Context) {
             !aiEnabled && WHO.containsMatchIn(t) ->
                 Reply.Say("I am JARVIS, sir. Your personal assistant, and the only one in this phone with any manners.")
             t == "thank you" || t == "thanks" -> Reply.Say("Always a pleasure, sir.")
-            aiEnabled -> Reply.Say(askAi(t))
+            aiEnabled -> askAi(t)
             else -> Reply.Say(
                 "I can call, message on WhatsApp, remember things, set reminders and find places nearby, sir. " +
                     "Open questions need my AI connection, which isn't set up yet."
@@ -187,7 +198,7 @@ class JarvisBrain(context: Context) {
         val found = findContacts(name)
         return when {
             found.isEmpty() -> Reply.Say("I couldn't find $name in your contacts, sir.")
-            found.size == 1 -> Reply.Call(found[0])
+            found.size == 1 -> callOrConfirm(found[0])
             else -> choose(found) { c -> Reply.Call(c) }
         }
     }
@@ -221,7 +232,7 @@ class JarvisBrain(context: Context) {
         val found = findContacts(name)
         return when {
             found.isEmpty() -> Reply.Say("I couldn't find $name in your contacts, sir.")
-            found.size == 1 -> Reply.SendWhatsApp(found[0], message)
+            found.size == 1 -> waOrConfirm(found[0], message)
             else -> choose(found) { c -> Reply.SendWhatsApp(c, message) }
         }
     }
@@ -275,37 +286,62 @@ class JarvisBrain(context: Context) {
 
     // ─── AI ──────────────────────────────────────────────────────────────────
 
-    private suspend fun askAi(question: String): String = withContext(Dispatchers.IO) {
+    private suspend fun askAi(question: String): Reply = withContext(Dispatchers.IO) {
         try {
             val messages = JSONArray().apply {
                 put(JSONObject().put("role", "system").put("content", systemPrompt()))
-                history.forEach { (role, text) -> put(JSONObject().put("role", role).put("content", text)) }
+                synchronized(history) {
+                    history.forEach { (role, text) -> put(JSONObject().put("role", role).put("content", text)) }
+                }
                 put(JSONObject().put("role", "user").put("content", question))
             }
             val body = JSONObject().apply {
                 put("model", BuildConfig.GROQ_MODEL)
-                put("max_tokens", 180)
-                put("temperature", 0.8)
+                put("max_tokens", 200)
+                put("temperature", 0.7)
                 put("messages", messages)
+                put("tools", JSONArray(TOOLS_JSON))
+                put("tool_choice", "auto")
             }.toString().toRequestBody("application/json".toMediaType())
             val req = Request.Builder()
                 .url("https://api.groq.com/openai/v1/chat/completions")
-                .addHeader("Authorization", "Bearer ${BuildConfig.GROQ_API_KEY}")
+                .addHeader("Authorization", "Bearer ${groqKey()}")
                 .post(body)
                 .build()
-            http.newCall(req).execute().use { resp ->
-                if (resp.code == 429) return@withContext "I've hit today's free AI limit, sir. The basics still work."
-                if (!resp.isSuccessful) return@withContext "My AI service returned an error, sir. Code ${resp.code}."
-                val json = JSONObject(resp.body?.string() ?: "{}")
-                val answer = json.getJSONArray("choices").getJSONObject(0)
-                    .getJSONObject("message").getString("content")
-                    .replace(Regex("[*#_`]"), "").trim()
-                    .ifEmpty { "I'm not sure, sir." }
-                addToHistory(question, answer)
-                answer
+            val json = http.newCall(req).execute().use { resp ->
+                if (resp.code == 429) return@withContext Reply.Say("I've hit today's free AI limit, sir. Calls and the basics still work.")
+                if (resp.code == 401) return@withContext Reply.Say("My AI key wasn't accepted, sir. Please check it in Setup questions.")
+                if (!resp.isSuccessful) return@withContext Reply.Say("My AI service returned an error, sir. Code ${resp.code}.")
+                JSONObject(resp.body?.string() ?: "{}")
             }
+            val msg = json.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+            val calls = msg.optJSONArray("tool_calls")
+            if (calls != null && calls.length() > 0) {
+                val fn = calls.getJSONObject(0).getJSONObject("function")
+                val args = try { JSONObject(fn.optString("arguments", "{}")) } catch (e: Exception) { JSONObject() }
+                return@withContext runTool(fn.optString("name"), args)
+            }
+            val content = if (msg.isNull("content")) "" else msg.optString("content")
+            val answer = content.replace(Regex("[*#_`]"), "").trim().ifEmpty { "I'm not sure, sir." }
+            addToHistory(question, answer)
+            Reply.Say(answer)
         } catch (e: Exception) {
-            "I couldn't reach my AI service just now, sir. Please check the internet connection."
+            Reply.Say("I couldn't reach my AI service just now, sir. Please check the internet connection.")
+        }
+    }
+
+    /** The AI chose an action: run it with the same code the fast paths use. */
+    private suspend fun runTool(name: String, args: JSONObject): Reply {
+        val who = args.optString("name").lowercase(Locale.ENGLISH).trim()
+        return when (name) {
+            "call_contact" -> callReply(who)
+            "send_whatsapp" -> sendTo(who, polish(args.optString("message")))
+            "set_reminder" -> remind(" " + args.optString("when") + " to " + args.optString("text"))
+            "remember_note" -> remember(args.optString("note"))
+            "set_nickname" -> setNickname(args.optString("word"), args.optString("contact_name"))
+            "find_places" -> placesReply(args.optString("category").lowercase(Locale.ENGLISH) + " near me")
+                ?: Reply.Say("I can't search for that kind of place yet, sir.")
+            else -> Reply.Say("I'm not sure how to do that yet, sir.")
         }
     }
 
@@ -325,6 +361,11 @@ class JarvisBrain(context: Context) {
             sb.append("\nThings the user asked you to remember, in his own words (newest first):")
             notes.forEach { sb.append("\n- ").append(it.text) }
         }
+        val nick = store.aliases()
+        if (nick.isNotEmpty()) {
+            sb.append("\nContact nicknames (what the user says → name saved in contacts):")
+            nick.forEach { (w, c) -> sb.append("\n- ").append(w).append(" → ").append(c) }
+        }
         return sb.toString()
     }
 
@@ -337,16 +378,52 @@ class JarvisBrain(context: Context) {
         return Reply.ChooseContact("I found ${found.size} contacts. $list. Which one, sir?$more", opts, onPick)
     }
 
-    /** "dad" also tries papa / appa / father; "mom" tries amma / mummy / mother. */
+    /** Your saved nicknames first (mom → "birth giver"), then family words (amma, papa…), then the name itself. */
     private fun findContacts(name: String): List<Contact> {
-        val key = name.lowercase(Locale.ENGLISH).trim()
+        val key = normalizeWho(name)
         val group = ALIASES.firstOrNull { key in it }
-        val candidates = if (group != null) listOf(key) + (group - key) else listOf(key)
-        for (c in candidates) {
-            val r = contacts.chercherContact(c)
+        val words = if (group != null) listOf(key) + (group - key) else listOf(key)
+        for (w in words) {
+            val target = store.alias(w) ?: continue
+            val r = contacts.chercherContact(target)
+            if (r.isNotEmpty()) return r
+        }
+        for (w in words) {
+            val r = contacts.chercherContact(w)
             if (r.isNotEmpty()) return r
         }
         return emptyList()
+    }
+
+    private fun normalizeWho(s: String): String =
+        s.lowercase(Locale.ENGLISH).trim().removePrefix("my ").removePrefix("the ").trim()
+
+    private fun setNickname(wordRaw: String, contactRaw: String): Reply {
+        val word = normalizeWho(wordRaw)
+        val target = contactRaw.trim().lowercase(Locale.ENGLISH)
+        if (word.isEmpty() || target.isEmpty()) {
+            return Reply.Say("Say it like this, sir: remember that mom means birth giver.")
+        }
+        store.setAlias(word, target)
+        val found = granted(Manifest.permission.READ_CONTACTS) && contacts.chercherContact(target).isNotEmpty()
+        return Reply.Say(
+            if (found) "Understood, sir. When you say $word, I'll use $target."
+            else "Saved, sir. Though I can't find $target in your contacts, so please check the spelling."
+        )
+    }
+
+    private fun callOrConfirm(c: Contact): Reply =
+        if (prefs.confirmCalls) Reply.Confirm("Call ${c.nom}?") { Reply.Call(c) } else Reply.Call(c)
+
+    private fun waOrConfirm(c: Contact, message: String): Reply =
+        if (prefs.confirmWhatsApp) Reply.Confirm("Send ${c.nom}: $message. Shall I send it?") { Reply.SendWhatsApp(c, message) }
+        else Reply.SendWhatsApp(c, message)
+
+    /** "yes", "go ahead", "haan"… but not "no" / "cancel". */
+    fun isYes(spoken: String): Boolean {
+        val t = clean(spoken)
+        if (isCancel(t) || Regex("\\b(no|nope|don't|dont|wait)\\b").containsMatchIn(t)) return false
+        return Regex("\\b(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|send it|call|haan|ha|correct|please)\\b").containsMatchIn(t)
     }
 
     private fun needContacts() =
@@ -394,6 +471,11 @@ class JarvisBrain(context: Context) {
             .trim()
 
     companion object {
+        // "remember that mom means birth giver", "when I say gf I mean mamacita", "mom is saved as birth giver"
+        private val NICKNAME = Regex(
+            "^(?:please )?(?:(?:remember|note) (?:that )?|when i say )([a-z' ]+?) (?:means|i mean|is saved as|is called|refers to) ([a-z0-9' ]+)$" +
+                "|^([a-z' ]+?) is saved as ([a-z0-9' ]+)$"
+        )
         private val REMEMBER = Regex("^(?:please )?(?:remember|note down|make a note|keep in mind|don't forget)(?: that)? (.+)$")
         private val RECALL = Regex("\\bwhat (?:do you|did you) (?:remember|know about me)\\b|\\bwhat (?:did|have) i (?:told|tell|asked|ask) you\\b|\\b(?:read|show|list) my notes\\b")
         private val FORGET = Regex("^(?:please )?forget (?:about |that )?(.+)$")
@@ -422,8 +504,19 @@ class JarvisBrain(context: Context) {
 
         private val ALIASES = listOf(
             listOf("dad", "papa", "appa", "father", "daddy", "pappa", "pa"),
-            listOf("mom", "mummy", "amma", "mother", "mum", "mommy", "ma", "mama")
+            listOf("mom", "mummy", "amma", "mother", "mum", "mommy", "ma", "mama"),
+            listOf("girlfriend", "gf", "babe", "baby", "my love")
         )
+
+        /** Actions the AI may choose. Same names the code above handles in runTool(). */
+        private const val TOOLS_JSON = """[
+ {"type":"function","function":{"name":"call_contact","description":"Start a phone call. Use the name or nickname exactly as the user said it, e.g. mom, mamacita, Rahul.","parameters":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}},
+ {"type":"function","function":{"name":"send_whatsapp","description":"Send a WhatsApp message to a contact.","parameters":{"type":"object","properties":{"name":{"type":"string","description":"Contact name or nickname as the user said it"},"message":{"type":"string","description":"The exact message to send, written as the user would write it"}},"required":["name","message"]}}},
+ {"type":"function","function":{"name":"set_reminder","description":"Set a reminder.","parameters":{"type":"object","properties":{"text":{"type":"string","description":"What to remind about, e.g. call dad"},"when":{"type":"string","description":"When, in plain words, e.g. in 10 minutes, at 6 pm, tomorrow at 9 am, on friday evening"}},"required":["text","when"]}}},
+ {"type":"function","function":{"name":"remember_note","description":"Save a fact the user wants you to remember.","parameters":{"type":"object","properties":{"note":{"type":"string"}},"required":["note"]}}},
+ {"type":"function","function":{"name":"set_nickname","description":"Save that a word the user says refers to a contact saved under another name.","parameters":{"type":"object","properties":{"word":{"type":"string","description":"What the user says, e.g. mom"},"contact_name":{"type":"string","description":"Name saved in the phone contacts, e.g. birth giver"}},"required":["word","contact_name"]}}},
+ {"type":"function","function":{"name":"find_places","description":"Find places near the user.","parameters":{"type":"object","properties":{"category":{"type":"string","enum":["cafes","restaurants","pharmacies","atms","petrol pumps","hospitals","bakeries","ice cream"]}},"required":["category"]}}}
+]"""
 
         /** Used only when the AI isn't connected. */
         private val JOKES = listOf(
@@ -442,7 +535,7 @@ class JarvisBrain(context: Context) {
                 "Your reply is spoken aloud: one to three short sentences, plain words, no lists, no markdown, no emoji. " +
                 "Be accurate. If unsure, say so briefly instead of guessing. " +
                 "You cannot see live information (news, weather, prices, scores) unless it appears in this conversation; say so plainly if asked. " +
-                "Actions like calling, WhatsApp, reminders, notes and nearby places are handled before you; if the user asks for one " +
-                "and you received it anyway, tell him the phrase to use, for example: remind me at 6 PM to call Dad."
+                "When the user asks you to do something (call, WhatsApp, reminder, remember a note, a contact nickname, nearby places), " +
+                "use the matching tool instead of replying with text. For everything else, just answer."
     }
 }
