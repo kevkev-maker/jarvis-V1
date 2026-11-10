@@ -38,7 +38,7 @@ android {
         versionName = "1.0-jarvis"
 
         buildConfigField("String", "GROQ_API_KEY", "\"${localProp("GROQ_API_KEY")}\"")
-        buildConfigField("String", "GROQ_MODEL", "\"${localProp("GROQ_MODEL", "llama-3.1-8b-instant")}\"")
+        buildConfigField("String", "GROQ_MODEL", "\"${localProp("GROQ_MODEL", "openai/gpt-oss-20b")}\"")
     }
 
     buildFeatures {
